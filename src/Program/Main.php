@@ -17,7 +17,7 @@ class Main
     public function __construct(array $args)
     {
         Console::WriteLine("Starting server");
-        $this->server = new Server("192.168.0.4", 8080);
+        $this->server = new Server("127.0.0.1", 8080);
 
         $this->server->On("start", function(Server $server) {
             Console::WriteLine("Server started");
@@ -26,8 +26,8 @@ class Main
         $this->server->On("request", function(Request $request, Response $response) {
             Console::Write("Request received. Content: ", ForegroundColors::DARK_PURPLE, BackgroundColors::YELLOW);
             Console::WriteLine($request->GetRawContent());
-            var_dump($request->Server);
-            if ($request->Server["request_uri"] == "/stop")
+
+            if ($request->RequestUri == "/stop")
             {
                 $this->server->Shutdown();
             }
