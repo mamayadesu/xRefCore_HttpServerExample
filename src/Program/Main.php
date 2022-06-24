@@ -1,5 +1,7 @@
 <?php
 
+declare(ticks=1);
+
 namespace Program;
 
 use Data\String\ForegroundColors;
@@ -8,10 +10,11 @@ use HttpServer\Request;
 use HttpServer\Response;
 use HttpServer\Server;
 use IO\Console;
+use Scheduler\AsyncTask;
 
 class Main
 {
-    const WEBPATH = "/var/httpserverexample/"; // DOCUMENT ROOT
+    const WEBPATH = "C:\\httpserver\\"; // DOCUMENT ROOT
 
     private Server $server;
 
@@ -33,18 +36,6 @@ class Main
         $this->server->On("request", function(Request $request, Response $response)
         {
             Console::WriteLine("[" . date("d.m.Y H:i:s", time()) . "] '" . $request->RequestUri . "' from " . $request->RemoteAddress . ":" . $request->RemotePort);
-
-            /**
-             * #################
-             * SHUTDOWN SERVER ON http://yousite.example/*shutdown
-             * #################
-             */
-            if ($request->RequestUri == "/*shutdown")
-            {
-                $response->End("Server shutting down");
-                $this->server->Shutdown();
-                return;
-            }
 
             /**
              * #################
@@ -92,85 +83,12 @@ class Main
              * PATH TO TARGET FILE OR DIRECTORY ON LOCAL MACHINE
              * #################
              */
-            $target = self::WEBPATH . $newPath;
+            $target = self::WEBPATH . rawurldecode($newPath);
             if (is_dir($target))
             {
                 $dirContentPage = $this->GetDirContentPage($request->RequestUri, $prevDirectory, $target);
                 $response->End($dirContentPage); // Print directory content
                 return;
-            }
-
-            /**
-             * #################
-             * GETTING FILE EXTENSION AND MIME TYPE
-             * #################
-             */
-            $extension = strtolower(pathinfo($target, PATHINFO_EXTENSION));
-            $mime = "octet/stream";
-            switch ($extension)
-            {
-                case "css":
-                    $mime = "text/css";
-                    break;
-
-                case "js":
-                    $mime = "application/javascript";
-                    break;
-
-                case "txt":
-                    $mime = "text/plain";
-                    break;
-
-                case "jpg":
-                case "jpeg":
-                    $mime = "image/jpeg";
-                    break;
-
-                case "gif":
-                    $mime = "image/gif";
-                    break;
-
-                case "png":
-                    $mime = "image/png";
-                    break;
-
-                case "htm":
-                case "html":
-                    $mime = "text/html";
-                    break;
-
-                case "doc":
-                case "dot":
-                    $mime = "application/msword";
-                    break;
-
-                case "pdf":
-                    $mime = "application/pdf";
-                    break;
-
-                case "mp3":
-                    $mime = "audio/mpeg";
-                    break;
-
-                case "wav":
-                    $mime = "audio/x-wav";
-                    break;
-
-                case "bmp":
-                    $mime = "image/bmp";
-                    break;
-
-                case "ico":
-                    $mime = "image/x-icon";
-                    break;
-
-                case "mp4":
-                    $mime = "video/mp4";
-                    break;
-
-                case "avi":
-                    $mime = "video/x-msvideo";
-                    break;
             }
 
             /**
@@ -201,6 +119,13 @@ HTML;
 
             /**
              * #################
+             * GETTING MIME TYPE
+             * #################
+             */
+            $mime = mime_content_type($target);
+
+            /**
+             * #################
              * GETTING FILE CONTENT
              * #################
              */
@@ -213,7 +138,12 @@ HTML;
              */
             $response->Status(200);
             $response->Header("Content-Type", $mime);
-            $response->End($content);
+            /**
+             * We'll send content using async task to do not block whole process,
+             * because file content may be large
+             */
+            $params = new RequestAsyncHandlerParams($content, $response);
+            new AsyncTask($this, 1, false, [$this, "RequestAsyncHandler"], $params);
         });
 
         $this->server->On("shutdown", function(Server $server)
@@ -221,13 +151,21 @@ HTML;
             Console::WriteLine("Server was shutdown");
         });
 
+        /**
+         * Starting HTTP-server asynchronously
+         */
+        $this->server->ClientNonBlockMode = true;
         try
         {
-            $this->server->Start();
+            $this->server->Start(true);
         }
         catch (ServerStartException $e)
         {
             Console::WriteLine("Failed to start server. " . $e->getMessage(), ForegroundColors::RED);
+        }
+        while(true)
+        {
+            time_nanosleep(0, 1000000); // don't let process stop
         }
     }
 
@@ -330,5 +268,18 @@ HTML;
     </body>
 </html>";
         return $result;
+    }
+
+    public function RequestAsyncHandler(AsyncTask $task, RequestAsyncHandlerParams $params) : void
+    {
+        $tile = $params->GetNext();
+
+        if ($tile == "")
+        {
+            $params->Response->End();
+            $task->Cancel();
+            return;
+        }
+        $params->Response->PrintBody($tile);
     }
 }
