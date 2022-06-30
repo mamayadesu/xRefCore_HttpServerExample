@@ -4,31 +4,34 @@ namespace Program;
 
 use HttpServer\Response;
 use Scheduler\IAsyncTaskParameters;
+use TypeError;
 
 class RequestAsyncHandlerParams implements IAsyncTaskParameters
 {
-    /**
-     * @var array<string>
-     */
-    public array $Tiles;
-
     public Response $Response;
 
-    public function __construct(string $fileContent, Response $response)
+    /**
+     * @var resource
+     */
+    public $File;
+
+    public function __construct($f, Response $response)
     {
-        /**
-         * Split data to 64KB packages
-         */
-        $this->Tiles = str_split($fileContent, 65536);
+        $t = gettype($f);
+        if ($t != "resource")
+        {
+            throw new TypeError("Argument 1 passed to Program\RequestAsyncHandlerParams::__construct() must be an resource, " . $t . " given");
+        }
+
+        $this->File = $f;
         $this->Response = $response;
     }
 
     public function GetNext() : string
     {
-        if (count($this->Tiles) == 0)
-        {
-            return "";
-        }
-        return array_shift($this->Tiles);
+        /**
+         * Reading next 8KB data of file
+         */
+        return fread($this->File, 8 * 1024);
     }
 }

@@ -11,15 +11,36 @@ use HttpServer\Response;
 use HttpServer\Server;
 use IO\Console;
 use Scheduler\AsyncTask;
+use Throwable;
 
 class Main
 {
-    const WEBPATH = "C:\\httpserver\\"; // DOCUMENT ROOT
+    const WEBPATH = "/var/www/html/"; // DOCUMENT ROOT
 
     private Server $server;
 
     public function __construct(array $args)
     {
+        /**
+         * Adding Ctrl+C handler
+         */
+
+        if (IS_WINDOWS)
+        {
+            sapi_windows_set_ctrl_handler(function(int $event) : void
+            {
+                if ($event == PHP_WINDOWS_EVENT_CTRL_C)
+                    $this->server->Shutdown();
+            }, true);
+        }
+        else
+        {
+            pcntl_signal(SIGINT, function() : void
+            {
+                $this->server->Shutdown();
+            });
+        }
+
         Console::WriteLine("Starting server");
         $this->server = new Server("0.0.0.0", 8080);
 
@@ -122,39 +143,78 @@ HTML;
              * GETTING MIME TYPE
              * #################
              */
-            $mime = mime_content_type($target);
+            $extension = strtolower(pathinfo($target, PATHINFO_EXTENSION));
+            $mime = $this->GetMimeByExtension($extension);
+
+            /**
+             * SETTING NON BLOCK MODE FOR VIDEO AND AUDIO
+             *
+             * * WHY NOT FOR ANY TYPE?
+             * IF WE ARE USING NON BLOCK MODE FOR LARGE FILES, IT MAY RESULT IN DATA LOSING
+             *
+             * * OKAY. WHY WE SET NON BLOCK MODE FOR AUDIO AND VIDEO?
+             * BECAUSE WHEN BROWSER IS LOADING PLAYABLE MEDIA CONTENT AND WE'RE SENDING DATA,
+             * BROWSER MAY NOT RESPOND WHILE IT IS LOADING ALREADY LOADED DATA AND YOUR APPLICATION WILL GET STUCK FOR SEVERAL SECONDS
+             */
+            if (in_array(explode('/', $mime)[0], ["video", "audio"]))
+            {
+                $response->ClientNonBlockMode = true;
+            }
 
             /**
              * #################
-             * GETTING FILE CONTENT
+             * OPENING FILE
              * #################
              */
-            $content = file_get_contents($target);
+            $file = @fopen($target, "r");
 
             /**
              * #################
-             * PRINTING RESULT
+             * SETTING HTTP 200 AND MIME TYPE
              * #################
              */
             $response->Status(200);
             $response->Header("Content-Type", $mime);
+
             /**
              * We'll send content using async task to do not block whole process,
              * because file content may be large
              */
-            $params = new RequestAsyncHandlerParams($content, $response);
+            try
+            {
+                $params = new RequestAsyncHandlerParams($file, $response);
+            }
+            catch (\Throwable $t)
+            {
+                Console::WriteLine("Opening file " . $target . " failed. " . $t->getMessage(), ForegroundColors::RED);
+
+                $_500 = <<<HTML
+
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+<html><head>
+<title>500 Internal Server Error</title>
+</head><body>
+<h1>Internal Server Error</h1>
+<hr>
+<address>xRefCore Web Server</address>
+</body></html>
+
+HTML;
+
+                $response->Status(500);
+                $response->End($_500);
+                return;
+            }
+            $params = new RequestAsyncHandlerParams($file, $response);
             new AsyncTask($this, 1, false, [$this, "RequestAsyncHandler"], $params);
         });
 
         $this->server->On("shutdown", function(Server $server)
         {
             Console::WriteLine("Server was shutdown");
+            exit(0);
         });
 
-        /**
-         * Starting HTTP-server asynchronously
-         */
-        $this->server->ClientNonBlockMode = true;
         try
         {
             $this->server->Start(true);
@@ -163,7 +223,7 @@ HTML;
         {
             Console::WriteLine("Failed to start server. " . $e->getMessage(), ForegroundColors::RED);
         }
-        while(true)
+        while (true)
         {
             time_nanosleep(0, 1000000); // don't let process stop
         }
@@ -203,6 +263,7 @@ HTML;
          */
         foreach (scandir($target) as $name)
         {
+            $nameEncoded = iconv("UTF-8", "WINDOWS-1251", $name);
             /**
              * Getting full path to target directory on local machine to get file size
              */
@@ -260,7 +321,7 @@ HTML;
             /**
              * Adding this directory or file to <table>
              */
-            $result .= "<tr><td><a href='" . $requestUri . $name . "'>" . $name . "</a></td><td>" . $targetType . "</td><td>" . $size . "</td><td>" . date("d.m.Y H:i:s", filemtime($fullPathToTarget)) . "</td></tr>";
+            $result .= "<tr><td><a href='" . $requestUri . $nameEncoded . "'>" . $nameEncoded . "</a></td><td>" . $targetType . "</td><td>" . $size . "</td><td>" . date("d.m.Y H:i:s", filemtime($fullPathToTarget)) . "</td></tr>\n";
         }
 
         $result .= "
@@ -281,5 +342,76 @@ HTML;
             return;
         }
         $params->Response->PrintBody($tile);
+    }
+
+    public function GetMimeByExtension(string $ext) : string
+    {
+        $mime = "octet/stream";
+        switch ($ext)
+        {
+            case "css":
+                $mime = "text/css";
+                break;
+
+            case "js":
+                $mime = "application/javascript";
+                break;
+
+            case "txt":
+                $mime = "text/plain";
+                break;
+
+            case "jpg":
+            case "jpeg":
+                $mime = "image/jpeg";
+                break;
+
+            case "gif":
+                $mime = "image/gif";
+                break;
+
+            case "png":
+                $mime = "image/png";
+                break;
+
+            case "htm":
+            case "html":
+                $mime = "text/html";
+                break;
+
+            case "doc":
+            case "dot":
+                $mime = "application/msword";
+                break;
+
+            case "pdf":
+                $mime = "application/pdf";
+                break;
+
+            case "mp3":
+                $mime = "audio/mpeg";
+                break;
+
+            case "wav":
+                $mime = "audio/x-wav";
+                break;
+
+            case "bmp":
+                $mime = "image/bmp";
+                break;
+
+            case "ico":
+                $mime = "image/x-icon";
+                break;
+
+            case "mp4":
+                $mime = "video/mp4";
+                break;
+
+            case "avi":
+                $mime = "video/x-msvideo";
+                break;
+        }
+        return $mime;
     }
 }
