@@ -4,13 +4,17 @@ declare(ticks=1);
 
 namespace Program;
 
+use Application\Application;
 use Data\String\ForegroundColors;
+use HttpServer\Exceptions\ConnectionLostException;
 use HttpServer\Exceptions\ServerStartException;
 use HttpServer\Request;
 use HttpServer\Response;
 use HttpServer\Server;
 use IO\Console;
 use Scheduler\AsyncTask;
+use Scheduler\IAsyncTaskParameters;
+use Scheduler\SchedulerMaster;
 use Throwable;
 
 class Main
@@ -21,10 +25,18 @@ class Main
 
     public function __construct(array $args)
     {
+        new AsyncTask($this, 100, false, function(AsyncTask $task, IAsyncTaskParameters $params) : void
+        {
+            $title = "HttpServerExample";
+            $title .= " | Tasks: " . (count(SchedulerMaster::GetActiveTasks()) - 1);
+            $title .= " | RAM: " . round(memory_get_usage() / 1024 / 1024, 2) . " MB";
+            Application::SetTitle($title);
+        });
+        Response::$IgnoreConnectionLost = false;
+
         /**
          * Adding Ctrl+C handler
          */
-
         if (IS_WINDOWS)
         {
             sapi_windows_set_ctrl_handler(function(int $event) : void
@@ -182,7 +194,7 @@ HTML;
              */
             try
             {
-                $params = new RequestAsyncHandlerParams($file, $response);
+                $params = new RequestAsyncHandlerParams($file, $request, $response);
             }
             catch (\Throwable $t)
             {
@@ -205,7 +217,7 @@ HTML;
                 $response->End($_500);
                 return;
             }
-            $params = new RequestAsyncHandlerParams($file, $response);
+            $params = new RequestAsyncHandlerParams($file, $request, $response);
             new AsyncTask($this, 1, false, [$this, "RequestAsyncHandler"], $params);
         });
 
@@ -334,14 +346,31 @@ HTML;
     public function RequestAsyncHandler(AsyncTask $task, RequestAsyncHandlerParams $params) : void
     {
         $tile = $params->GetNext();
-
+        $request = $params->Request;
         if ($tile == "")
         {
-            $params->Response->End();
+            try
+            {
+                $params->Response->End();
+            }
+            catch (ConnectionLostException $e)
+            {
+                Console::WriteLine("[" . date("d.m.Y H:i:s", time()) . "] DATA TRANSFER FAILURE. '" . $request->RequestUri . "' from " . $request->RemoteAddress . ":" . $request->RemotePort . ". " . $e->getMessage());
+                $task->Cancel();
+            }
             $task->Cancel();
             return;
         }
-        $params->Response->PrintBody($tile);
+
+        try
+        {
+            $params->Response->PrintBody($tile);
+        }
+        catch (ConnectionLostException $e)
+        {
+            Console::WriteLine("[" . date("d.m.Y H:i:s", time()) . "] DATA TRANSFER FAILURE. '" . $request->RequestUri . "' from " . $request->RemoteAddress . ":" . $request->RemotePort . ". " . $e->getMessage());
+            $task->Cancel();
+        }
     }
 
     public function GetMimeByExtension(string $ext) : string

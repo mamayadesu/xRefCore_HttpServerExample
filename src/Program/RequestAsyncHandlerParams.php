@@ -2,12 +2,14 @@
 
 namespace Program;
 
+use HttpServer\Request;
 use HttpServer\Response;
 use Scheduler\IAsyncTaskParameters;
 use TypeError;
 
 class RequestAsyncHandlerParams implements IAsyncTaskParameters
 {
+    public Request $Request;
     public Response $Response;
 
     /**
@@ -15,7 +17,7 @@ class RequestAsyncHandlerParams implements IAsyncTaskParameters
      */
     public $File;
 
-    public function __construct($f, Response $response)
+    public function __construct($f, Request $request, Response $response)
     {
         $t = gettype($f);
         if ($t != "resource")
@@ -24,6 +26,7 @@ class RequestAsyncHandlerParams implements IAsyncTaskParameters
         }
 
         $this->File = $f;
+        $this->Request = $request;
         $this->Response = $response;
     }
 
