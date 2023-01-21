@@ -30,8 +30,11 @@ class Main
             $title = "HttpServerExample";
             $title .= " | Tasks: " . (count(SchedulerMaster::GetActiveTasks()) - 1);
             $title .= " | RAM: " . round(memory_get_usage() / 1024 / 1024, 2) . " MB";
+            $title .= " | " . date("Y-m-d H:i:s", time());
+            $title .= " | " . count($this->server->GetUnsentResponses());
             Application::SetTitle($title);
         });
+
         Response::$IgnoreConnectionLost = false;
 
         /**
@@ -175,18 +178,26 @@ HTML;
 
             /**
              * #################
-             * OPENING FILE
+             * SETTING HTTP 200, FILE SIZE AND MIME TYPE
              * #################
              */
-            $file = @fopen($target, "r");
+            $filesize = filesize($target);
+            $response->Status(200);
+            $response->Header("Content-Type", $mime);
+            $response->Header("Content-Length", $filesize);
 
             /**
              * #################
-             * SETTING HTTP 200 AND MIME TYPE
+             * OPENING FILE
              * #################
              */
-            $response->Status(200);
-            $response->Header("Content-Type", $mime);
+            if ($filesize <= 1024 * 1024 * 1024)
+            {
+                $response->End(@file_get_contents($target));
+                return;
+            }
+
+            $file = @fopen($target, "r");
 
             /**
              * We'll send content using async task to do not block whole process,
@@ -229,15 +240,11 @@ HTML;
 
         try
         {
-            $this->server->Start(true);
+            $this->server->Start();
         }
         catch (ServerStartException $e)
         {
             Console::WriteLine("Failed to start server. " . $e->getMessage(), ForegroundColors::RED);
-        }
-        while (true)
-        {
-            time_nanosleep(0, 1000000); // don't let process stop
         }
     }
 
