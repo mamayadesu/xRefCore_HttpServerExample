@@ -4,7 +4,6 @@ declare(ticks=1);
 
 namespace Program;
 
-use Application\Application;
 use Data\String\ForegroundColors;
 use HttpServer\Exceptions\ConnectionLostException;
 use HttpServer\Exceptions\ServerStartException;
@@ -14,27 +13,17 @@ use HttpServer\Server;
 use IO\Console;
 use Scheduler\AsyncTask;
 use Scheduler\IAsyncTaskParameters;
-use Scheduler\SchedulerMaster;
 use Throwable;
 
 class Main
 {
-    const WEBPATH = "/var/www/html/"; // DOCUMENT ROOT
+    public string $DocumentRoot;
 
     private Server $server;
 
     public function __construct(array $args)
     {
-        new AsyncTask($this, 100, false, function(AsyncTask $task, IAsyncTaskParameters $params) : void
-        {
-            $title = "HttpServerExample";
-            $title .= " | Tasks: " . (count(SchedulerMaster::GetActiveTasks()) - 1);
-            $title .= " | RAM: " . round(memory_get_usage() / 1024 / 1024, 2) . " MB";
-            $title .= " | " . date("Y-m-d H:i:s", time());
-            $title .= " | " . count($this->server->GetUnsentResponses());
-            Application::SetTitle($title);
-        });
-
+        $this->DocumentRoot = $args[1] ?? "/var/www/";
         Response::$IgnoreConnectionLost = false;
 
         /**
@@ -61,7 +50,7 @@ class Main
 
         $this->server->On("start", function(Server $server)
         {
-            Console::WriteLine("Server started");
+            Console::WriteLine("Server started with document root '" . $this->DocumentRoot . "'");
         });
 
         /**
@@ -78,10 +67,8 @@ class Main
              * REDIRECT TO index.html
              * #################
              */
-            if ($request->RequestUri == "/" && file_exists(self::WEBPATH . "index.html"))
+            if ($request->PathInfo == "/" && file_exists($this->DocumentRoot . "index.html"))
             {
-                $request->RequestUri .= "index.html";
-                $request->RequestUrl .= "/index.html";
                 $request->PathInfo .= "index.html";
             }
             $path = $request->PathInfo;
@@ -119,7 +106,7 @@ class Main
              * PATH TO TARGET FILE OR DIRECTORY ON LOCAL MACHINE
              * #################
              */
-            $target = self::WEBPATH . rawurldecode($newPath);
+            $target = $this->DocumentRoot . rawurldecode($newPath);
             if (is_dir($target))
             {
                 $dirContentPage = $this->GetDirContentPage($request->RequestUri, $prevDirectory, $target);
@@ -174,15 +161,19 @@ HTML;
             if (in_array(explode('/', $mime)[0], ["video", "audio"]))
             {
                 $response->ClientNonBlockMode = true;
+                $response->Status(206);
+            }
+            else
+            {
+                $response->Status(200);
             }
 
             /**
              * #################
-             * SETTING HTTP 200, FILE SIZE AND MIME TYPE
+             * SETTING FILE SIZE AND MIME TYPE
              * #################
              */
             $filesize = filesize($target);
-            $response->Status(200);
             $response->Header("Content-Type", $mime);
             $response->Header("Content-Length", $filesize);
 
@@ -191,25 +182,21 @@ HTML;
              * OPENING FILE
              * #################
              */
-            if ($filesize <= 1024 * 1024 * 1024)
+            // If file size less than 1 MiB, let's just return it one piece
+            if ($filesize < 1024 * 1024)
             {
                 $response->End(@file_get_contents($target));
                 return;
             }
 
-            $file = @fopen($target, "r");
-
             /**
              * We'll send content using async task to do not block whole process,
              * because file content may be large
              */
-            try
+            $file = @fopen($target, "r");
+            if (!$file)
             {
-                $params = new RequestAsyncHandlerParams($file, $request, $response);
-            }
-            catch (\Throwable $t)
-            {
-                Console::WriteLine("Opening file " . $target . " failed. " . $t->getMessage(), ForegroundColors::RED);
+                Console::WriteLine("Opening file " . $target . " failed.", ForegroundColors::RED);
 
                 $_500 = <<<HTML
 
@@ -235,7 +222,6 @@ HTML;
         $this->server->On("shutdown", function(Server $server)
         {
             Console::WriteLine("Server was shutdown");
-            exit(0);
         });
 
         try

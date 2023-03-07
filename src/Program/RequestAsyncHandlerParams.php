@@ -33,8 +33,8 @@ class RequestAsyncHandlerParams implements IAsyncTaskParameters
     public function GetNext() : string
     {
         /**
-         * Reading next 8KB data of file
+         * Reading next 16KB data of file
          */
-        return fread($this->File, 8 * 1024);
+        return fread($this->File, 16 * 1024);
     }
 }
