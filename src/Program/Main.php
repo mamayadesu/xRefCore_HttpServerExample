@@ -4,6 +4,7 @@ declare(ticks=1);
 
 namespace Program;
 
+use Application\Application;
 use Data\String\ForegroundColors;
 use HttpServer\Exceptions\ConnectionLostException;
 use HttpServer\Exceptions\ServerStartException;
@@ -13,6 +14,7 @@ use HttpServer\Server;
 use IO\Console;
 use Scheduler\AsyncTask;
 use Scheduler\IAsyncTaskParameters;
+use Scheduler\SchedulerMaster;
 use Throwable;
 
 class Main
@@ -21,8 +23,65 @@ class Main
 
     private Server $server;
 
+    private float $prevUl = 0, $prevDl = 0, $speedUl = 0, $speedDl = 0;
+
     public function __construct(array $args)
     {
+        new AsyncTask($this, 100, false, function(AsyncTask $task, IAsyncTaskParameters $params) : void
+        {
+            $title = "HttpServerExample";
+            $title .= " | Tasks: " . (count(SchedulerMaster::GetActiveTasks()) - 1);
+            $title .= " | RAM: " . round(memory_get_usage() / 1024 / 1024, 2) . " MB";
+            $title .= " | " . date("Y-m-d H:i:s", time());
+            $title .= " | " . count($this->server->GetUnsentResponses());
+
+            if ($this->speedDl < 1024)
+            {
+                $download = $this->speedDl . " B/S";
+            }
+            else if ($this->speedDl < 1024 * 1024)
+            {
+                $download = round($this->speedDl / 1024, 2) . " KiB/S";
+            }
+            else if ($this->speedDl < 1024 * 1024 * 1024)
+            {
+                $download = round($this->speedDl / 1024 / 1024, 2) . " MiB/S";
+            }
+            else
+            {
+                $download = round($this->speedDl / 1024 / 1024 / 1024, 2) . " GiB/S";
+            }
+
+            if ($this->speedUl < 1024)
+            {
+                $upload = $this->speedUl . " B/S";
+            }
+            else if ($this->speedUl < 1024 * 1024)
+            {
+                $upload = round($this->speedUl / 1024, 2) . " KiB/S";
+            }
+            else if ($this->speedUl < 1024 * 1024 * 1024)
+            {
+                $upload = round($this->speedUl / 1024 / 1024, 2) . " MiB/S";
+            }
+            else
+            {
+                $upload = round($this->speedUl / 1024 / 1024 / 1024, 2) . " GiB/S";
+            }
+
+            $title .= " | DL: " . $download;
+            $title .= " | UL: " . $upload;
+            Application::SetTitle($title);
+        });
+
+        new AsyncTask($this, 1000, false, function(AsyncTask $task, IAsyncTaskParameters $params) : void {
+            $this->speedDl = $this->server->GetBytesReceived() - $this->prevDl;
+            $this->speedUl = $this->server->GetBytesSent() - $this->prevUl;
+
+            $this->prevDl = $this->server->GetBytesReceived();
+            $this->prevUl = $this->server->GetBytesSent();
+        });
+
         $this->DocumentRoot = $args[1] ?? "/var/www/";
         Response::$IgnoreConnectionLost = false;
 
