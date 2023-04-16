@@ -119,7 +119,7 @@ class Main
          */
         $this->server->On("request", function(Request $request, Response $response)
         {
-            Console::WriteLine("[" . date("d.m.Y H:i:s", time()) . "] '" . $request->RequestUri . "' from " . $request->RemoteAddress . ":" . $request->RemotePort);
+            Console::WriteLine("[" . date("d.m.Y H:i:s", time()) . "] '" . $request->RequestUri . "' from " . $request->RemoteAddress . ":" . $request->RemotePort . " (server " . $request->ServerAddress . ")");
 
             /**
              * #################
